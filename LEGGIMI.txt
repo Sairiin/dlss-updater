@@ -1,0 +1,84 @@
+DLSS UPDATER
+============
+Creato da Sairiin.
+(c) 2026 Sairiin - Tutti i diritti riservati.
+Vietata la copia, la modifica e la distribuzione senza autorizzazione dell'autore.
+
+Cosa fa
+-------
+Aggiorna il file del DLSS (nvngx_dlss.dll) dei tuoi giochi all'ultima versione
+ufficiale NVIDIA. Prima di modificare un gioco salva sempre il file originale:
+con "Ripristina" il gioco torna esattamente com'era.
+
+- Scarica il DLSS solo dalla pagina ufficiale di NVIDIA (github.com/NVIDIA/DLSS)
+  e controlla che il file sia firmato da NVIDIA prima di usarlo.
+- Trova da solo i giochi di Steam, Epic, GOG, Battle.net e altre cartelle.
+- Non tocca i giochi con anti-cheat (EasyAntiCheat, BattlEye...) ne' quelli
+  installati dall'app Xbox.
+
+Requisiti
+---------
+- Windows 10 o 11.
+- Una scheda NVIDIA RTX (serie 20, 30, 40 o 50). Su GTX, AMD e Intel il DLSS
+  non esiste: il programma lo segnala e non modifica niente.
+- Connessione a internet (solo per scaricare il DLSS da NVIDIA).
+
+Come si usa
+-----------
+1. Estrai la cartella dallo zip (per esempio in Documenti).
+2. Doppio clic su "Avvia DLSS Updater.cmd".
+   - Se Windows mostra "Windows ha protetto il PC": premi "Ulteriori
+     informazioni" e poi "Esegui comunque" (succede con i file scaricati).
+   - Alla domanda "Consentire modifiche?" rispondi Si': serve per scrivere
+     nelle cartelle dei giochi.
+3. Chiudi il gioco, poi premi AGGIORNA DLSS sulla sua scheda (o APPLICA DLSS A TUTTI).
+   AGGIORNA DLSS fa due cose:
+   - aggiorna il file del DLSS all'ultima versione NVIDIA (salvando l'originale);
+   - nel profilo del gioco del driver NVIDIA attiva l'"Override DLSS" con il
+     modello piu' recente, come fa l'app NVIDIA (prima salva una copia completa
+     delle impostazioni NVIDIA).
+   Nei giochi con anti-cheat il file non viene toccato: si attiva solo
+   l'override del driver, che non modifica i file del gioco.
+4. Nel gioco attiva il DLSS dalle opzioni grafiche.
+   Per controllare che funzioni: IMPOSTAZIONI NVIDIA > "Mostra indicatore DLSS
+   nei giochi". Nell'angolo del gioco compare versione e preset in uso.
+Se un gioco non compare: "+ Aggiungi cartella giochi" e scegli la cartella dove
+sono installati i tuoi giochi.
+
+Giochi senza DLSS (pulsante OPTISCALER)
+---------------------------------------
+Il programma elenca tutti i giochi installati. Per quelli che hanno solo FSR o
+XeSS c'e' il pulsante OPTISCALER: installa OptiScaler (progetto open source,
+github.com/optiscaler/OptiScaler) che fa usare il DLSS al loro posto.
+ATTENZIONE: OptiScaler inietta codice nel gioco. Usalo SOLO in giochi single
+player / offline: nei giochi online rischi il ban. E' bloccato nei giochi con
+anti-cheat. Nel gioco scegli FSR o XeSS: verra' usato il DLSS. Il menu di
+OptiScaler si apre col tasto Inserisci (Ins). RIPRISTINA lo toglie del tutto.
+
+Finestra massimizzata (Impostazioni NVIDIA)
+-------------------------------------------
+In IMPOSTAZIONI NVIDIA c'e' l'opzione "Apri tutti i giochi in finestra
+massimizzata senza bordi". Utile con piu' monitor: quando un gioco e' aperto in
+modalita' FINESTRA, il programma toglie i bordi e lo allarga a tutto il monitor
+su cui si trova (il mouse passa libero agli altri monitor, Alt+Tab immediato).
+Non e' un'impostazione del driver NVIDIA (non esiste): la applica il programma,
+che quindi deve restare aperto. Se lo chiudi resta attivo vicino all'orologio.
+Per uscire del tutto: tasto destro sull'icona vicino all'orologio > Esci.
+
+Impostazioni NVIDIA
+-------------------
+Il pulsante IMPOSTAZIONI NVIDIA confronta le impostazioni globali del driver con
+quelle consigliate per giocare (bassa latenza, cache shader e, se il monitor
+supporta G-SYNC/FreeSync, G-SYNC + V-Sync + limite FPS sotto la frequenza del
+monitor). Con APPLICA CONSIGLIATE le cambia, salvando prima una copia completa
+di tutte le impostazioni NVIDIA. Con RIPRISTINA BACKUP si torna indietro.
+
+Se qualcosa non va: riapri il programma e premi RIPRISTINA.
+Il file registro.log nella stessa cartella elenca tutto quello che ha fatto.
+
+Attenzione
+----------
+Nei giochi online i termini d'uso spesso vietano di modificare i file. Cambiare
+solo il file del DLSS e' una pratica molto diffusa e non risultano ban, ma
+nessuno puo' garantirlo: decidi tu se usarlo sui giochi online.
+Quando un gioco si aggiorna puo' rimettere il DLSS vecchio: basta ripremere AGGIORNA.

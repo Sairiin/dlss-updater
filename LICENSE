@@ -1,0 +1,30 @@
+DLSS Updater
+Copyright (c) 2026 Sairiin. All rights reserved.
+
+This software and its source code are published for transparency and for the
+personal use of the program as distributed in this repository.
+
+Without prior written permission from the author, you may NOT:
+- copy, modify, merge, or create derivative works of the source code;
+- redistribute, republish, mirror, sublicense, sell, or rebrand the software
+  or any modified version of it.
+
+You MAY download and run the unmodified software for your own personal use.
+
+This software downloads third-party components (NVIDIA DLSS, OptiScaler) from
+their official sources at runtime. Those components are not included in this
+repository and are governed by their own licenses.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY ARISING FROM THE USE OF THE SOFTWARE.
+
+NVIDIA, GeForce, RTX, DLSS and G-SYNC are trademarks of NVIDIA Corporation.
+This project is not affiliated with or endorsed by NVIDIA.
+
+---
+
+Italiano: (c) 2026 Sairiin - Tutti i diritti riservati. Il codice e' pubblicato
+per trasparenza e per l'uso personale del programma. E' vietato copiarlo,
+modificarlo, ridistribuirlo o pubblicarne versioni modificate senza
+autorizzazione scritta dell'autore.

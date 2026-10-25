@@ -1,0 +1,7 @@
+# Dati creati dal programma sul PC di chi lo usa: non vanno pubblicati.
+cache/
+backup/
+registro.log
+config.json
+avviso_rtx20-30_mostrato.txt
+*.nvdrs
