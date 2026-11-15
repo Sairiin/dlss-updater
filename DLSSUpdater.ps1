@@ -1283,16 +1283,27 @@ function Show-GfxDialog($g) {
         if ($null -ne $current) { $i = 0; foreach ($k in $items.Keys) { if ("$($items[$k])" -eq "$current") { $sel = $i }; $i++ } }
         $cmb.SelectedIndex = $sel
         $dlg.Controls.Add($cmb)
-        $dlg.Controls.Add((New-Label $spiega (New-Font 8) $C.Sub 26 ($script:gy + 28)))
+        $lblSpiega = New-Object Windows.Forms.Label -Property @{ Text = $spiega; Font = (New-Font 8); ForeColor = $C.Sub; BackColor = 'Transparent'; Location = "26,$($script:gy + 28)"; Size = '700,30' }
+        $dlg.Controls.Add($lblSpiega)
         $combos[$key] = $cmb
-        $script:gy += 54
+        $script:gy += 62
     }
     $script:gy = $y + 6
     if ($g.Dll) {
         $curMode = if ($entry -and $entry.Scelte.PSObject.Properties['SrMode']) { $entry.Scelte.SrMode } else { $null }
         & $addCombo 'SrMode' "Qualita' DLSS forzata" "Sovrascrive la modalita' scelta nel gioco. DLAA rende alla risoluzione piena: bellissimo ma pesante, solo se hai FPS da vendere." $GfxSrModes $curMode
         $curPreset = if ($entry -and $entry.Preset) { $entry.Preset } else { $NvLatestPreset }
-        & $addCombo 'SrPreset' 'Modello DLSS (preset)' "Il modello Transformer piu' recente e' quasi sempre il migliore. K e' l'alternativa se noti ghosting o sfocature." $GfxPresets $curPreset
+        # Consiglio in base alla scheda: K = Transformer di 1a generazione (DLSS 4, piu' leggero);
+        # L e M = Transformer di 2a generazione (DLSS 4.5, piu' nitidi ma piu' pesanti); "piu' recente" = l'ultimo pubblicato da NVIDIA.
+        $gpuShort = $script:gpu -replace '^NVIDIA\s+(GeForce\s+)?', ''
+        if ($script:olderRtx) {
+            $presets = [ordered]@{ "Piu' recente  -  massima nitidezza, il piu' pesante" = $NvLatestPreset; "K  -  Transformer leggero  (consigliato per $gpuShort)" = 11; 'L  -  DLSS 4.5, pesante' = 12; 'M  -  DLSS 4.5, pesante' = 13 }
+            $consiglio = "Consiglio per la tua $($gpuShort): sulle RTX 20/30 i modelli Transformer costano FPS. Parti da K; passa a 'Piu' recente' solo nei giochi leggeri. L e M sono i piu' pesanti."
+        } else {
+            $presets = [ordered]@{ "Piu' recente  -  DLSS 4.5  (consigliato per $gpuShort)" = $NvLatestPreset; 'K  -  Transformer 1a gen., se noti ghosting' = 11; 'L  -  DLSS 4.5' = 12; 'M  -  DLSS 4.5' = 13 }
+            $consiglio = "Consiglio per la tua $($gpuShort): sulle RTX 40/50 il costo dei Transformer e' trascurabile. Tieni 'Piu' recente'; prova K solo se vedi ghosting o sfocature in movimento."
+        }
+        & $addCombo 'SrPreset' 'Modello DLSS (preset)' $consiglio $presets $curPreset
         if ($isRtx50 -and ($g.Extra | Where-Object { $_.Sigla -eq 'FG' })) {
             $curMf = if ($entry -and $entry.Scelte.PSObject.Properties['MultiFrame']) { $entry.Scelte.MultiFrame } else { $null }
             & $addCombo 'MultiFrame' 'Multi Frame Generation' "Solo RTX 50: quanti fotogrammi generare per ognuno renderizzato. Piu' fluido, ma aumenta un po' la latenza." $GfxMultiFg $curMf
@@ -1313,7 +1324,7 @@ function Show-GfxDialog($g) {
         $values = @{}; $scelte = [ordered]@{}
         foreach ($o in $GfxOptions) { $scelte[$o.Key] = $checks[$o.Key].Checked; if ($checks[$o.Key].Checked) { foreach ($k in $o.Set.Keys) { $values[$k] = $o.Set[$k] } } }
         if ($combos.ContainsKey('SrMode')) { $v = $GfxSrModes[$combos['SrMode'].SelectedItem]; $scelte['SrMode'] = $v; if ($null -ne $v) { $values['SrMode'] = $v; $values['SrOverride'] = 1 } }
-        if ($combos.ContainsKey('SrPreset')) { $v = $GfxPresets[$combos['SrPreset'].SelectedItem]; if ($v -ne $NvLatestPreset) { $values['SrPreset'] = $v; $values['SrOverride'] = 1 } }
+        if ($combos.ContainsKey('SrPreset')) { $v = $presets[$combos['SrPreset'].SelectedItem]; if ($v -ne $NvLatestPreset) { $values['SrPreset'] = $v; $values['SrOverride'] = 1 } }
         if ($combos.ContainsKey('MultiFrame')) { $v = $GfxMultiFg[$combos['MultiFrame'].SelectedItem]; $scelte['MultiFrame'] = $v; if ($null -ne $v) { $values['MultiFrame'] = $v; $values['FgOverride'] = 1; $values['FgPreset'] = $NvLatestPreset } }
         $dlg.Close()
         $n = $values.Count
