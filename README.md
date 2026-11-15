@@ -16,12 +16,12 @@ Tutto quello che modifica viene **salvato prima**: con **Ripristina** ogni gioco
 
 ### Aggiorna DLSS
 Per ogni gioco che usa il DLSS, il pulsante **AGGIORNA DLSS**:
-1. sostituisce il file del DLSS del gioco (`nvngx_dlss.dll`) con l'**ultima versione ufficiale**, scaricata dalla pagina GitHub di NVIDIA ([github.com/NVIDIA/DLSS](https://github.com/NVIDIA/DLSS)). Il file viene usato **solo se è firmato digitalmente da NVIDIA**;
+1. sostituisce i file del DLSS del gioco (`nvngx_dlss.dll` e, se presenti, **Frame Generation** `nvngx_dlssg.dll` e **Ray Reconstruction** `nvngx_dlssd.dll`) con l'**ultima versione ufficiale**, scaricata dalla pagina GitHub di NVIDIA ([github.com/NVIDIA/DLSS](https://github.com/NVIDIA/DLSS)). Ogni file viene usato **solo se è firmato digitalmente da NVIDIA**;
 2. attiva nel **profilo del gioco del driver NVIDIA** l'"Override DLSS" con il **modello più recente**, come fa l'"Override DLSS" dell'app NVIDIA. Così il gioco usa il modello nuovo anche in modalità *Qualità*.
 
 **APPLICA DLSS A TUTTI** fa la stessa cosa su tutti i giochi in un colpo solo.
 
-Per ogni gioco il programma mostra il tipo di DLSS (DLSS 2, 3, 4, 4.5) attuale e quello originale salvato.
+Per ogni gioco il programma mostra il tipo di DLSS (DLSS 2, 3, 4, 4.5) attuale, le versioni di Frame Generation (FG) e Ray Reconstruction (RR) se il gioco le ha, e l'originale salvato.
 
 ### Giochi con anti-cheat
 Nei giochi con EasyAntiCheat, BattlEye e simili **il file del gioco non viene mai toccato**: si attiva solo l'override nel driver NVIDIA, che non modifica i file del gioco (è lo stesso meccanismo dell'app NVIDIA).

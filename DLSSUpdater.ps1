@@ -1,5 +1,6 @@
-# DLSS Updater - aggiorna il file DLSS (nvngx_dlss.dll) dei giochi con l'ultima
-# versione ufficiale NVIDIA, salvando sempre l'originale per poterlo ripristinare.
+# DLSS Updater - aggiorna i file DLSS dei giochi (nvngx_dlss.dll, piu' Frame
+# Generation nvngx_dlssg.dll e Ray Reconstruction nvngx_dlssd.dll se presenti)
+# con l'ultima versione ufficiale NVIDIA, salvando sempre l'originale per poterlo ripristinare.
 # Scarica solo dal repository ufficiale github.com/NVIDIA/DLSS e verifica che il
 # file sia firmato da NVIDIA prima di usarlo. Non tocca giochi con anti-cheat.
 #
@@ -16,6 +17,8 @@ $BackupDir = Join-Path $Root 'backup'
 $BackupIndex = Join-Path $BackupDir 'indice.json'
 $LogFile = Join-Path $Root 'registro.log'
 $DllName = 'nvngx_dlss.dll'
+# Altri file della famiglia DLSS, pubblicati da NVIDIA nello stesso repository: sigla mostrata nella scheda.
+$ExtraDlls = [ordered]@{ 'nvngx_dlssg.dll' = 'FG'; 'nvngx_dlssd.dll' = 'RR' }
 
 # Program Files richiede i permessi di amministratore per scrivere.
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
@@ -209,8 +212,16 @@ $SkipDirs = '\\(Windows|NVIDIA Corporation|Common Files|WindowsApps|DLSS Updater
 function New-GameEntry([string]$dir, [string]$name, [string]$src) {
     [pscustomobject]@{
         Nome = $name; Fonte = $src; Cartella = $dir; Dll = $null; Versione = [version]'0.0'
-        Fsr = $false; Xess = $false; AntiCheat = $null; Exes = @(); Forzato = $false; Opti = $false
+        Fsr = $false; Xess = $false; AntiCheat = $null; Exes = @(); Forzato = $false; Opti = $false; Extra = @()
     }
+}
+
+# File FG/RR del gioco (il piu' vicino alla radice per ciascuno), dato l'elenco delle sue DLL.
+function Get-ExtraEntries($dlls) {
+    @(foreach ($n in $ExtraDlls.Keys) {
+        $f = $dlls | Where-Object { $_.Name -eq $n } | Sort-Object { $_.FullName.Length } | Select-Object -First 1
+        if ($f) { [pscustomobject]@{ Nome = $n; Sigla = $ExtraDlls[$n]; Dll = $f.FullName; Versione = ConvertTo-DlssVersion $f.VersionInfo.FileVersion } }
+    })
 }
 
 function Find-Games {
@@ -224,7 +235,7 @@ function Find-Games {
         $g = New-GameEntry $dir $installed[$dir].Nome $installed[$dir].Fonte
         $dlls = @(Get-ChildItem $dir -Recurse -Depth $DeepScan -Filter *.dll -File -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch $SkipDirs })
         $dlss = $dlls | Where-Object { $_.Name -eq $DllName } | Sort-Object { $_.FullName.Length } | Select-Object -First 1
-        if ($dlss) { $g.Dll = $dlss.FullName; $g.Versione = ConvertTo-DlssVersion $dlss.VersionInfo.FileVersion }
+        if ($dlss) { $g.Dll = $dlss.FullName; $g.Versione = ConvertTo-DlssVersion $dlss.VersionInfo.FileVersion; $g.Extra = @(Get-ExtraEntries $dlls) }
         $g.Fsr = [bool]($dlls | Where-Object { $_.Name -match $FsrPattern } | Select-Object -First 1)
         $g.Xess = [bool]($dlls | Where-Object { $_.Name -match $XessPattern } | Select-Object -First 1)
         $games.Add($g); $byDir[$dir] = $g
@@ -242,6 +253,7 @@ function Find-Games {
             if ($byDir.ContainsKey($root)) { return }
             $g = New-GameEntry $root (Split-Path $root -Leaf) (Get-GameSource $root)
             $g.Dll = $path; $g.Versione = ConvertTo-DlssVersion $_.VersionInfo.FileVersion
+            $g.Extra = @(Get-ExtraEntries @(Get-ChildItem (Split-Path $path) -Filter *.dll -File -ErrorAction SilentlyContinue))
             $games.Add($g); $byDir[$root] = $g
         }
     }
@@ -261,22 +273,40 @@ function Find-Games {
 function Get-LatestDlss {
     $rel = Invoke-RestMethod 'https://api.github.com/repos/NVIDIA/DLSS/releases/latest' -UseBasicParsing -TimeoutSec 20
     $tag = $rel.tag_name
-    $dest = Join-Path $CacheDir "$tag\$DllName"
-    if (-not (Test-Path $dest)) {
-        New-Item -ItemType Directory -Force (Split-Path $dest) | Out-Null
-        # GitHub indica l'indirizzo esatto del file per quella versione.
-        $url = (Invoke-RestMethod "https://api.github.com/repos/NVIDIA/DLSS/contents/lib/Windows_x86_64/rel/$($DllName)?ref=$tag" -UseBasicParsing -TimeoutSec 20).download_url
-        Invoke-WebRequest $url -OutFile "$dest.tmp" -UseBasicParsing -TimeoutSec 300
-        $sig = Get-AuthenticodeSignature "$dest.tmp"
-        if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'NVIDIA Corporation') {
-            Remove-Item "$dest.tmp" -Force
-            throw "Il file scaricato non ha una firma NVIDIA valida ($($sig.Status)): annullato."
+    $files = [ordered]@{}
+    foreach ($n in @($DllName) + @($ExtraDlls.Keys)) {
+        $dest = Join-Path $CacheDir "$tag\$n"
+        if (-not (Test-Path $dest)) {
+            New-Item -ItemType Directory -Force (Split-Path $dest) | Out-Null
+            # GitHub indica l'indirizzo esatto del file per quella versione.
+            # FG e RR sono facoltativi: se una versione non li pubblica, si aggiorna solo il DLSS.
+            try { $url = (Invoke-RestMethod "https://api.github.com/repos/NVIDIA/DLSS/contents/lib/Windows_x86_64/rel/$($n)?ref=$tag" -UseBasicParsing -TimeoutSec 20).download_url }
+            catch { if ($n -eq $DllName) { throw }; Write-Log "NVIDIA $tag non pubblica $n : saltato"; continue }
+            Invoke-WebRequest $url -OutFile "$dest.tmp" -UseBasicParsing -TimeoutSec 300
+            $sig = Get-AuthenticodeSignature "$dest.tmp"
+            if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch 'NVIDIA Corporation') {
+                Remove-Item "$dest.tmp" -Force
+                throw "Il file scaricato ($n) non ha una firma NVIDIA valida ($($sig.Status)): annullato."
+            }
+            Move-Item "$dest.tmp" $dest -Force
+            Write-Log "Scaricato $n $tag da $url (firma NVIDIA valida)"
         }
-        Move-Item "$dest.tmp" $dest -Force
-        Write-Log "Scaricato DLSS $tag da $url (firma NVIDIA valida)"
+        $files[$n] = [pscustomobject]@{ Path = $dest; Versione = ConvertTo-DlssVersion (Get-Item $dest).VersionInfo.FileVersion }
     }
-    return [pscustomobject]@{ Tag = $tag; Path = $dest; Versione = ConvertTo-DlssVersion (Get-Item $dest).VersionInfo.FileVersion }
+    return [pscustomobject]@{ Tag = $tag; Path = $files[$DllName].Path; Versione = $files[$DllName].Versione; File = $files }
 }
+
+# File del gioco (DLSS, FG, RR) piu' vecchi dell'ultima versione NVIDIA.
+function Get-OldFiles($game, $latest) {
+    $old = @()
+    if (-not $latest) { return $old }
+    if ($game.Dll -and $game.Versione -lt $latest.Versione) { $old += [pscustomobject]@{ Nome = $DllName; Sigla = 'DLSS'; Dll = $game.Dll; Versione = $game.Versione } }
+    foreach ($x in $game.Extra) { $lf = $latest.File[$x.Nome]; if ($lf -and $x.Versione -lt $lf.Versione) { $old += $x } }
+    return $old
+}
+
+# Tutti i percorsi dei file DLSS del gioco (principale + FG/RR).
+function Get-GameDllPaths($game) { @(@($game.Dll) + @($game.Extra | ForEach-Object Dll) | Where-Object { $_ }) }
 
 function Test-GameRunning($game) {
     return [bool](Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.Path -and $_.Path.StartsWith($game.Cartella + '\', [StringComparison]::OrdinalIgnoreCase) })
@@ -288,15 +318,18 @@ function Update-Game($game, $latest) {
     if ($game.Fonte -eq 'Xbox') { throw "$($game.Nome) e' un gioco dell'app Xbox: i suoi file sono protetti da Windows." }
     if (Test-GameRunning $game) { throw "$($game.Nome) e' aperto: chiudilo prima di aggiornare." }
     $idx = Get-BackupIndex
-    if (-not $idx.ContainsKey($game.Dll)) {
-        $bk = Join-Path $BackupDir ("{0}_{1}.dll" -f ($game.Nome -replace '[^\w\-]', '_'), [guid]::NewGuid().ToString('N').Substring(0, 8))
-        Copy-Item $game.Dll $bk -Force
-        $idx[$game.Dll] = [pscustomobject]@{ Backup = $bk; VersioneOriginale = "$($game.Versione)"; Data = (Get-Date -Format 'yyyy-MM-dd HH:mm') }
-        Save-BackupIndex $idx
-        Write-Log "Backup di $($game.Dll) (v$($game.Versione)) in $bk"
+    foreach ($f in Get-OldFiles $game $latest) {
+        $new = $latest.File[$f.Nome]
+        if (-not $idx.ContainsKey($f.Dll)) {
+            $bk = Join-Path $BackupDir ("{0}_{1}.dll" -f ($game.Nome -replace '[^\w\-]', '_'), [guid]::NewGuid().ToString('N').Substring(0, 8))
+            Copy-Item $f.Dll $bk -Force
+            $idx[$f.Dll] = [pscustomobject]@{ Backup = $bk; VersioneOriginale = "$($f.Versione)"; Data = (Get-Date -Format 'yyyy-MM-dd HH:mm') }
+            Save-BackupIndex $idx
+            Write-Log "Backup di $($f.Dll) (v$($f.Versione)) in $bk"
+        }
+        Copy-Item $new.Path $f.Dll -Force
+        Write-Log "Aggiornato $($game.Nome) [$($f.Sigla)]: $($f.Versione) -> $($new.Versione) ($($f.Dll))"
     }
-    Copy-Item $latest.Path $game.Dll -Force
-    Write-Log "Aggiornato $($game.Nome): $($game.Versione) -> $($latest.Versione) ($($game.Dll))"
 }
 
 # --- Override DLSS nel profilo del driver ("Forza DLSS") ---
@@ -323,7 +356,7 @@ function Get-ProfileName($game) { "DLSS Updater - $($game.Nome)" }
 # Da forzare: serve l'override nel driver, oppure il file e' vecchio (e si puo' toccare).
 function Test-NeedsForce($game) {
     if (-not $script:gpu -or $game.Fonte -eq 'Xbox' -or -not $game.Dll) { return $false }
-    return -not ($game.Forzato -and ($game.AntiCheat -or $game.Versione -ge $script:latest.Versione))
+    return -not ($game.Forzato -and ($game.AntiCheat -or -not (Get-OldFiles $game $script:latest)))
 }
 
 function Test-Forced($game) {
@@ -350,7 +383,7 @@ function Enable-GameOverride($game, $latest) {
     if (-not $game.Exes) { throw "Non trovo l'eseguibile di $($game.Nome)." }
     if (Test-GameRunning $game) { throw "$($game.Nome) e' aperto: chiudilo prima di aggiornare il DLSS." }
     # Il file si aggiorna solo se non c'e' anti-cheat; l'override del driver non tocca i file del gioco.
-    if (-not $game.AntiCheat -and $game.Versione -lt $latest.Versione) { Update-Game $game $latest }
+    if (-not $game.AntiCheat -and (Get-OldFiles $game $latest)) { Update-Game $game $latest }
     $bk = Save-NvBackup 'prima_di_forzare'
     $created = $false
     $prof = [NvDrs]::WriteApp([string[]]$game.Exes, (Get-ProfileName $game), [uint32[]]@($NvOverride.Values), $NvOverrideValues, [ref]$created)
@@ -470,13 +503,15 @@ function Restore-Game($game) {
     if ($game.Opti) { Uninstall-Opti $game }
     if ($game.Forzato -or (Get-ForceIndex).ContainsKey($game.Cartella)) { Disable-GameOverride $game }
     $idx = Get-BackupIndex
-    if (-not $game.Dll -or -not $idx.ContainsKey($game.Dll)) { return }
-    $entry = $idx[$game.Dll]
-    Copy-Item $entry.Backup $game.Dll -Force
-    Remove-Item $entry.Backup -Force
-    $idx.Remove($game.Dll)
-    Save-BackupIndex $idx
-    Write-Log "Ripristinato $($game.Nome) alla versione originale $($entry.VersioneOriginale)"
+    foreach ($p in Get-GameDllPaths $game) {
+        if (-not $idx.ContainsKey($p)) { continue }
+        $entry = $idx[$p]
+        Copy-Item $entry.Backup $p -Force
+        Remove-Item $entry.Backup -Force
+        $idx.Remove($p)
+        Save-BackupIndex $idx
+        Write-Log "Ripristinato $($game.Nome) alla versione originale $($entry.VersioneOriginale) ($p)"
+    }
 }
 
 # Il DLSS funziona solo sulle schede NVIDIA RTX: su GTX, AMD e Intel il file non verrebbe usato.
@@ -746,8 +781,8 @@ function Get-UpscalerText($g) {
 }
 
 function New-GameCard($g, $idx) {
-    $hasBackup = $g.Dll -and $idx.ContainsKey($g.Dll)
-    $fileOk = $g.AntiCheat -or $g.Versione -ge $script:latest.Versione   # con anti-cheat il file non si tocca
+    $hasBackup = [bool](Get-GameDllPaths $g | Where-Object { $idx.ContainsKey($_) })
+    $fileOk = $g.AntiCheat -or -not (Get-OldFiles $g $script:latest)   # con anti-cheat i file non si toccano
     $done = $g.Forzato -and $fileOk
     $isDlss = [bool]$g.Dll -and -not $g.Opti
     if ($g.Fonte -eq 'Xbox') { $state = 'PROTETTO  -  APP XBOX'; $stateColor = $C.Sub }
@@ -787,14 +822,18 @@ function New-GameCard($g, $idx) {
     elseif ($isDlss) { $capOrig = 'ORIGINALE SALVATO'; $origText = if ($hasBackup) { Format-Dlss ([version]$idx[$g.Dll].VersioneOriginale) } else { '-' } }
     else { $capOrig = 'UPSCALER DEL GIOCO'; $origText = Get-UpscalerText $g }
     $curText = if ($g.Dll) { Format-Dlss $g.Versione } else { 'Nessun DLSS' }
+    # Riga piccola con Frame Generation / Ray Reconstruction, se il gioco li ha.
+    $extraText = (@($g.Extra) | Where-Object { $_ } | ForEach-Object { "$($_.Sigla) $($_.Versione.Major).$($_.Versione.Minor).$([Math]::Max($_.Versione.Build, 0))" }) -join '    '
     $cols = @(
-        @('capCur', 'DLSS ATTUALE', (New-Font 7.5 'Bold'), $C.Sub, 18),
-        @('valCur', $curText, (New-Font 11 'Bold'), $(if ($g.Dll) { $C.Text } else { $C.Sub }), 36),
-        @('state', $state, (New-Font 8 'Bold'), $stateColor, 66),
+        @('capCur', 'DLSS ATTUALE', (New-Font 7.5 'Bold'), $C.Sub, 16),
+        @('valCur', $curText, (New-Font 11 'Bold'), $(if ($g.Dll) { $C.Text } else { $C.Sub }), 32),
+        @('extra', $extraText, (New-Font 7.5), $C.Sub, 54),
+        @('state', $state, (New-Font 8 'Bold'), $stateColor, 70),
         @('capOrig', $capOrig, (New-Font 7.5 'Bold'), $C.Sub, 18),
         @('valOrig', $origText, (New-Font 11), $C.Text, 36)
     )
     foreach ($col in $cols) { $l = New-Label $col[1] $col[2] $col[3] 0 $col[4]; $l.Name = $col[0]; $card.Controls.Add($l) }
+    if ($extraText) { $script:tips.SetToolTip($card.Controls['extra'], "FG = Frame Generation (nvngx_dlssg.dll), RR = Ray Reconstruction (nvngx_dlssd.dll). Si aggiornano insieme al DLSS.") }
 
     # Pulsante centrale: AGGIORNA DLSS per i giochi con DLSS, OPTISCALER per gli altri.
     if ($isDlss) {
@@ -844,7 +883,7 @@ function Set-CardLayout($card) {
     $card.Controls['up'].Location = "$($card.Width - 270),31"
     $xOrig = $card.Width - 270 - 30 - 190
     $xCur = $xOrig - 200
-    foreach ($n in 'capCur', 'valCur', 'state') { $card.Controls[$n].Left = $xCur }
+    foreach ($n in 'capCur', 'valCur', 'extra', 'state') { $card.Controls[$n].Left = $xCur }
     foreach ($n in 'capOrig', 'valOrig') { $card.Controls[$n].Left = $xOrig }
     $card.Controls['path'].Width = [Math]::Max($xCur - 40, 60)
 }
@@ -858,6 +897,7 @@ function Update-GameList {
         if (-not $script:latest) { $script:latest = Get-LatestDlss }
         $lblLatest.Text = "Ultimo NVIDIA:  $(Format-Dlss $script:latest.Versione)  (verificato)" + $(if ($script:gpu) { "`n$($script:gpu -replace '^NVIDIA\s+', '')" } else { '' })
         $lblLatest.ForeColor = $C.Text
+        $script:tips.SetToolTip($lblLatest, (($script:latest.File.Keys | ForEach-Object { "$_  $($script:latest.File[$_].Versione)" }) -join "`n"))
         # Mostra la cartella in esame: la ricerca profonda puo' richiedere qualche secondo.
         $savedText = $status.Text; $savedColor = $status.ForeColor
         $script:onScan = { param($p) $status.ForeColor = $C.Sub; $status.Text = "Ricerca dei giochi in corso...   $p"; [Windows.Forms.Application]::DoEvents() }

@@ -6,9 +6,11 @@ Vietata la copia, la modifica e la distribuzione senza autorizzazione dell'autor
 
 Cosa fa
 -------
-Aggiorna il file del DLSS (nvngx_dlss.dll) dei tuoi giochi all'ultima versione
-ufficiale NVIDIA. Prima di modificare un gioco salva sempre il file originale:
-con "Ripristina" il gioco torna esattamente com'era.
+Aggiorna i file del DLSS dei tuoi giochi all'ultima versione ufficiale NVIDIA:
+il DLSS (nvngx_dlss.dll) e, se il gioco li ha, anche la Frame Generation
+(nvngx_dlssg.dll, siglata FG) e la Ray Reconstruction (nvngx_dlssd.dll, RR).
+Prima di modificare un gioco salva sempre i file originali: con "Ripristina"
+il gioco torna esattamente com'era.
 
 - Scarica il DLSS solo dalla pagina ufficiale di NVIDIA (github.com/NVIDIA/DLSS)
   e controlla che il file sia firmato da NVIDIA prima di usarlo.
@@ -33,7 +35,8 @@ Come si usa
      nelle cartelle dei giochi.
 3. Chiudi il gioco, poi premi AGGIORNA DLSS sulla sua scheda (o APPLICA DLSS A TUTTI).
    AGGIORNA DLSS fa due cose:
-   - aggiorna il file del DLSS all'ultima versione NVIDIA (salvando l'originale);
+   - aggiorna i file del DLSS (e FG / RR se presenti) all'ultima versione
+     NVIDIA, salvando gli originali;
    - nel profilo del gioco del driver NVIDIA attiva l'"Override DLSS" con il
      modello piu' recente, come fa l'app NVIDIA (prima salva una copia completa
      delle impostazioni NVIDIA).
