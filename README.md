@@ -36,7 +36,7 @@ Per i giochi che hanno **solo FSR o XeSS** c'è il pulsante **OPTISCALER**: scar
 ![Giochi senza DLSS](screenshots/elenco-optiscaler.png)
 
 ### Migliora grafica (per gioco)
-Ogni gioco ha il pulsante **GRAFICA**: scrive nel **profilo del gioco nel driver NVIDIA** le impostazioni di qualità che si trovano nel Pannello di controllo: filtro anisotropico 16x, filtro texture ad alta qualità, blocco del LOD bias negativo, GPU a massime prestazioni e, nei giochi con DLSS, la **qualità DLSS forzata** (fino a DLAA) e il **modello (preset)**. Sulle RTX 50 anche la Multi Frame Generation.
+Ogni gioco ha il pulsante **GRAFICA**: scrive nel **profilo del gioco nel driver NVIDIA** le impostazioni di qualità che si trovano nel Pannello di controllo: filtro anisotropico 16x, filtro texture ad alta qualità, blocco del LOD bias negativo, GPU a massime prestazioni e, nei giochi con DLSS, la **qualità DLSS forzata** (fino a DLAA) e il **modello (preset)**, con un consiglio in base alla scheda: sulle RTX 20/30 il preset K (Transformer più leggero), sulle RTX 40/50 "Più recente" (DLSS 4.5). Sulle RTX 50 anche la Multi Frame Generation.
 Non tocca i file del gioco: è **sicuro anche nei giochi online e con anti-cheat**. Prima di ogni modifica viene salvata una copia completa delle impostazioni NVIDIA; **TOGLI TUTTO** o **RIPRISTINA** le rimuovono.
 
 ### Impostazioni NVIDIA

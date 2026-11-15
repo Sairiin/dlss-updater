@@ -63,7 +63,9 @@ Migliora la grafica (pulsante GRAFICA)
 Ogni gioco ha il pulsante GRAFICA: apre le impostazioni di qualita' del driver
 NVIDIA per quel gioco (filtro anisotropico 16x, filtro texture ad alta
 qualita', blocco del LOD bias negativo, GPU a massime prestazioni) e, nei
-giochi con DLSS, la qualita' DLSS forzata (fino a DLAA) e il modello (preset).
+giochi con DLSS, la qualita' DLSS forzata (fino a DLAA) e il modello (preset),
+con un consiglio in base alla tua scheda: sulle RTX 20/30 il preset K (piu'
+leggero), sulle RTX 40/50 "Piu' recente" (DLSS 4.5).
 Sono le stesse impostazioni del Pannello di controllo NVIDIA, scritte nel
 profilo del gioco: NON toccano i file del gioco, quindi sono sicure anche nei
 giochi online e con anti-cheat. Prima di applicarle viene salvata una copia
