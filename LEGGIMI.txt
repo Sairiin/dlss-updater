@@ -58,6 +58,24 @@ player / offline: nei giochi online rischi il ban. E' bloccato nei giochi con
 anti-cheat. Nel gioco scegli FSR o XeSS: verra' usato il DLSS. Il menu di
 OptiScaler si apre col tasto Inserisci (Ins). RIPRISTINA lo toglie del tutto.
 
+Migliora la grafica (pulsante GRAFICA)
+--------------------------------------
+Ogni gioco ha il pulsante GRAFICA: apre le impostazioni di qualita' del driver
+NVIDIA per quel gioco (filtro anisotropico 16x, filtro texture ad alta
+qualita', blocco del LOD bias negativo, GPU a massime prestazioni) e, nei
+giochi con DLSS, la qualita' DLSS forzata (fino a DLAA) e il modello (preset).
+Sono le stesse impostazioni del Pannello di controllo NVIDIA, scritte nel
+profilo del gioco: NON toccano i file del gioco, quindi sono sicure anche nei
+giochi online e con anti-cheat. Prima di applicarle viene salvata una copia
+completa delle impostazioni NVIDIA; TOGLI TUTTO o RIPRISTINA le rimuovono.
+DLAA e' bellissimo ma pesante: usalo solo se hai FPS da vendere.
+
+Altre comodita'
+---------------
+- Casella "Cerca gioco" sopra l'elenco per filtrare i giochi per nome.
+- All'apertura, se NVIDIA ha pubblicato un DLSS nuovo, lo dice nella barra di stato.
+- La finestra si riapre dove l'avevi lasciata.
+
 Finestra massimizzata (Impostazioni NVIDIA)
 -------------------------------------------
 In IMPOSTAZIONI NVIDIA c'e' l'opzione "Apri tutti i giochi in finestra

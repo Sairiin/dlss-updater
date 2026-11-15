@@ -85,12 +85,13 @@ function Save-BackupIndex($h) { $h | ConvertTo-Json -Depth 3 | Set-Content $Back
 $ConfigFile = Join-Path $Root 'config.json'
 # Preferenze: CartelleExtra (cartelle di giochi aggiunte a mano), FinestraMax (tutti i giochi in finestra massimizzata).
 function Get-Config {
-    $cfg = [ordered]@{ CartelleExtra = @(); FinestraMax = $false }
+    $cfg = [ordered]@{ CartelleExtra = @(); FinestraMax = $false; Finestra = $null }
     if (Test-Path $ConfigFile) {
         try {
             $j = Get-Content $ConfigFile -Raw | ConvertFrom-Json
             if ($j.CartelleExtra) { $cfg.CartelleExtra = @($j.CartelleExtra) }
             $cfg.FinestraMax = ($j.FinestraMax -eq $true)   # le versioni vecchie salvavano un elenco: vale come "spento"
+            if ($j.Finestra) { $cfg.Finestra = [string]$j.Finestra }   # posizione e dimensione dell'ultima volta
         } catch {}
     }
     return [pscustomobject]$cfg
@@ -212,7 +213,7 @@ $SkipDirs = '\\(Windows|NVIDIA Corporation|Common Files|WindowsApps|DLSS Updater
 function New-GameEntry([string]$dir, [string]$name, [string]$src) {
     [pscustomobject]@{
         Nome = $name; Fonte = $src; Cartella = $dir; Dll = $null; Versione = [version]'0.0'
-        Fsr = $false; Xess = $false; AntiCheat = $null; Exes = @(); Forzato = $false; Opti = $false; Extra = @()
+        Fsr = $false; Xess = $false; AntiCheat = $null; Exes = @(); Forzato = $false; Opti = $false; Extra = @(); Gfx = $false
     }
 }
 
@@ -259,11 +260,13 @@ function Find-Games {
     }
 
     $opti = Get-OptiIndex
+    $gfx = Get-GfxIndex
     foreach ($g in $games) {
         $g.AntiCheat = Test-AntiCheat $g.Cartella
         $g.Exes = Get-GameExes $g
         if ($g.Dll) { $g.Forzato = Test-Forced $g }
         $g.Opti = $opti.ContainsKey($g.Cartella)
+        $g.Gfx = $gfx.ContainsKey($g.Cartella)
     }
     # Prima i giochi con DLSS, poi gli altri, ognuno in ordine alfabetico.
     return $games | Sort-Object @{ Expression = { -not $_.Dll } }, Nome
@@ -273,6 +276,11 @@ function Find-Games {
 function Get-LatestDlss {
     $rel = Invoke-RestMethod 'https://api.github.com/repos/NVIDIA/DLSS/releases/latest' -UseBasicParsing -TimeoutSec 20
     $tag = $rel.tag_name
+    $tagDir = Join-Path $CacheDir $tag
+    if (-not (Test-Path $tagDir) -and (Get-ChildItem $CacheDir -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^v\d' })) {
+        $script:dlssNews = "NVIDIA ha appena pubblicato un nuovo DLSS ($tag): premi APPLICA DLSS A TUTTI per portarlo nei tuoi giochi.  "
+        Write-Log "Nuova versione DLSS pubblicata da NVIDIA: $tag"
+    }
     $files = [ordered]@{}
     foreach ($n in @($DllName) + @($ExtraDlls.Keys)) {
         $dest = Join-Path $CacheDir "$tag\$n"
@@ -364,7 +372,7 @@ function Test-Forced($game) {
     try {
         $prof = $null
         $v = [NvDrs]::ReadApp([string[]]$game.Exes, (Get-ProfileName $game), [uint32[]]@($NvOverride.Values), [ref]$prof)
-        return ($v[0] -eq 1 -and $v[1] -eq $NvLatestPreset)
+        return ($v[0] -eq 1 -and ($v[1] -eq $NvLatestPreset -or ($v[1] -ge 11 -and $v[1] -le 15)))
     } catch { return $false }
 }
 
@@ -386,7 +394,7 @@ function Enable-GameOverride($game, $latest) {
     if (-not $game.AntiCheat -and (Get-OldFiles $game $latest)) { Update-Game $game $latest }
     $bk = Save-NvBackup 'prima_di_forzare'
     $created = $false
-    $prof = [NvDrs]::WriteApp([string[]]$game.Exes, (Get-ProfileName $game), [uint32[]]@($NvOverride.Values), $NvOverrideValues, [ref]$created)
+    $prof = [NvDrs]::WriteApp([string[]]$game.Exes, (Get-ProfileName $game), [uint32[]]@($NvOverride.Values), (Get-OverrideValues $game), [ref]$created)
     $idx = Get-ForceIndex
     if (-not $idx.ContainsKey($game.Cartella)) {
         $idx[$game.Cartella] = [pscustomobject]@{ Profilo = $prof; Creato = $created; Exe = $game.Exes; Data = (Get-Date -Format 'yyyy-MM-dd HH:mm') }
@@ -404,6 +412,91 @@ function Disable-GameOverride($game) {
     [NvDrs]::ClearApp($exes, $prof, [uint32[]]@($NvOverride.Values), [bool]($entry -and $entry.Creato))
     if ($entry) { $idx.Remove($game.Cartella); Save-ForceIndex $idx }
     Write-Log "Tolto l'override DLSS per $($game.Nome) (profilo '$prof')"
+}
+
+# --- Migliora grafica: impostazioni di qualita' nel profilo driver del gioco ---
+# Vivono nel driver NVIDIA (come il Pannello di controllo), NON toccano i file del gioco:
+# per questo sono sicure anche nei giochi online e con anti-cheat. Codici da NvApiDriverSettings.h.
+$GfxIndex = Join-Path $BackupDir 'grafica.json'
+function Get-GfxIndex {
+    $h = @{}
+    if (Test-Path $GfxIndex) { (Get-Content $GfxIndex -Raw -Encoding UTF8 | ConvertFrom-Json).PSObject.Properties | ForEach-Object { $h[$_.Name] = $_.Value } }
+    return $h
+}
+function Save-GfxIndex($h) { $h | ConvertTo-Json -Depth 5 | Set-Content $GfxIndex -Encoding UTF8 }
+
+$GfxIds = @{
+    AnisoSel = [uint32]0x10D2BB16; AnisoLvl = [uint32]0x101E61A9     # ANISO_MODE_SELECTOR / ANISO_MODE_LEVEL
+    TexQual = [uint32]0x00CE2691; Trilin = [uint32]0x002ECAF2; AnisoOpt = [uint32]0x00E73211   # QUALITY_ENHANCEMENTS, TRILIN_SLOPE, ANISO_OPTS2
+    NoNegLod = [uint32]0x0019BB68; AutoLod = [uint32]0x00638E8F      # PS_TEXFILTER_NO_NEG_LODBIAS / AUTO_LODBIASADJUST
+    Power = [uint32]0x1057EB71                                        # PREFERRED_PSTATE
+    SrMode = [uint32]0x10AFB768                                       # NGX_DLSS_SR_MODE (qualita' DLSS forzata)
+    SrOverride = [uint32]0x10E41E01; SrPreset = [uint32]0x10E41DF3    # override + modello DLSS
+    FgOverride = [uint32]0x10E41E03; FgPreset = [uint32]0x10E41DF1; MultiFrame = [uint32]0x104D6667   # Multi Frame Generation (RTX 50)
+}
+# Caselle della finestra GRAFICA: ogni voce scrive uno o piu' valori nel profilo del gioco.
+$GfxOptions = @(
+    [pscustomobject]@{ Key = 'Aniso'; Nome = 'Filtro anisotropico 16x'; Perche = "Texture nitide anche in lontananza e viste di sbieco. Costo quasi nullo sulle RTX."; Set = @{ AnisoSel = 1; AnisoLvl = 16 } }
+    [pscustomobject]@{ Key = 'TexQ'; Nome = "Filtro texture: alta qualita'"; Perche = "Toglie le ottimizzazioni del driver (trilineare, campioni anisotropici): meno sfarfallio sulle texture. Costo minimo."; Set = @{ TexQual = 4294967286; Trilin = 1; AnisoOpt = 0 } }
+    [pscustomobject]@{ Key = 'Lod'; Nome = 'Blocca LOD bias negativo'; Perche = "Evita lo scintillio (shimmering) che alcuni giochi causano forzando texture troppo nitide."; Set = @{ NoNegLod = 1; AutoLod = 0 } }
+    [pscustomobject]@{ Key = 'Power'; Nome = 'GPU a massime prestazioni'; Perche = "La scheda resta ai clock alti per tutto il gioco: niente cali improvvisi. Consuma un po' di piu'."; Set = @{ Power = 1 } }
+)
+$GfxSrModes = [ordered]@{ 'Lascia decidere al gioco' = $null; "DLAA  -  massima qualita', niente upscaling (pesante)" = 4; "Qualita'" = 2; 'Bilanciato' = 1; 'Prestazioni' = 0; 'Ultra prestazioni' = 5 }
+$GfxPresets = [ordered]@{ "Piu' recente (consigliato)" = $NvLatestPreset; 'K  -  Transformer, molto nitido' = 11; 'L' = 12; 'M' = 13 }
+$GfxMultiFg = [ordered]@{ 'Lascia decidere al gioco' = $null; '2x' = 2; '3x' = 3; '4x' = 4 }
+
+# Valori dell'override DLSS per il gioco: preset scelto in GRAFICA, altrimenti "piu' recente".
+function Get-OverrideValues($game) {
+    $e = (Get-GfxIndex)[$game.Cartella]
+    $preset = if ($e -and $e.Preset) { [uint32]$e.Preset } else { $NvLatestPreset }
+    return [uint32[]]@(1, $preset, 1, $NvLatestPreset)
+}
+
+# Se il gioco ha l'override DLSS attivo lo riscrive: togliere le impostazioni grafiche puo' averlo tolto.
+function Restore-OverrideIfForced($game) {
+    $f = (Get-ForceIndex)[$game.Cartella]
+    if (-not $f) { return }
+    $created = $false
+    [void][NvDrs]::WriteApp([string[]]@($f.Exe), $f.Profilo, [uint32[]]@($NvOverride.Values), (Get-OverrideValues $game), [ref]$created)
+}
+
+# Scrive nel profilo del gioco le impostazioni date (nome -> valore, nomi di $GfxIds); $scelte e' cio' che l'utente ha spuntato, per rimostrarlo.
+function Set-GameGfx($game, [hashtable]$values, $scelte) {
+    if (-not (Get-RtxGpu)) { throw "Questo PC non ha una scheda NVIDIA RTX." }
+    if (-not $game.Exes) { throw "Non trovo l'eseguibile di $($game.Nome): il driver non saprebbe a quale programma applicare le impostazioni." }
+    $idx = Get-GfxIndex
+    $old = $idx[$game.Cartella]
+    $bk = Save-NvBackup 'prima_di_grafica'
+    $exes = if ($old) { [string[]]@($old.Exe) } else { [string[]]$game.Exes }
+    # Prima toglie quello messo in precedenza, poi scrive la nuova scelta.
+    if ($old) { [NvDrs]::ClearApp($exes, $old.Profilo, [uint32[]]@($old.Ids | ForEach-Object { [uint32]$_ }), $false) }
+    if ($values.Count -eq 0) {
+        if ($old) { Clear-GameGfx $game }
+        return
+    }
+    $ids = [uint32[]]@($values.Keys | ForEach-Object { $GfxIds[$_] })
+    $vals = [uint32[]]@($values.Keys | ForEach-Object { [uint32]([int64]$values[$_] -band 0xFFFFFFFF) })
+    $created = $false
+    $prof = [NvDrs]::WriteApp([string[]]$game.Exes, (Get-ProfileName $game), $ids, $vals, [ref]$created)
+    $idx[$game.Cartella] = [pscustomobject]@{
+        Profilo = $prof; Creato = [bool]($created -or ($old -and $old.Creato)); Exe = $game.Exes; Ids = @($ids | ForEach-Object { [int64]$_ })
+        Scelte = $scelte; Preset = $(if ($values.ContainsKey('SrPreset')) { [int64]$values['SrPreset'] } else { $null }); Data = (Get-Date -Format 'yyyy-MM-dd HH:mm')
+    }
+    Save-GfxIndex $idx
+    Restore-OverrideIfForced $game
+    Write-Log "Grafica per $($game.Nome) nel profilo driver '$prof'$(if ($created) { ' (creato)' }): $(($values.Keys | ForEach-Object { "$_=$($values[$_])" }) -join ', '); backup driver: $bk"
+}
+
+function Clear-GameGfx($game) {
+    $idx = Get-GfxIndex
+    $entry = $idx[$game.Cartella]
+    if (-not $entry) { return }
+    # Il profilo si cancella solo se l'ha creato GRAFICA e l'override DLSS non lo sta usando.
+    $del = [bool]$entry.Creato -and -not (Get-ForceIndex).ContainsKey($game.Cartella)
+    [NvDrs]::ClearApp([string[]]@($entry.Exe), $entry.Profilo, [uint32[]]@($entry.Ids | ForEach-Object { [uint32]$_ }), $del)
+    $idx.Remove($game.Cartella); Save-GfxIndex $idx
+    Restore-OverrideIfForced $game
+    Write-Log "Tolte le impostazioni grafiche per $($game.Nome) (profilo '$($entry.Profilo)')"
 }
 
 # --- OptiScaler (github.com/optiscaler/OptiScaler, GPL-3.0): DLSS nei giochi che hanno solo FSR/XeSS ---
@@ -501,6 +594,7 @@ function Uninstall-Opti($game) {
 function Restore-Game($game) {
     if (Test-GameRunning $game) { throw "$($game.Nome) e' aperto: chiudilo prima di ripristinare." }
     if ($game.Opti) { Uninstall-Opti $game }
+    if ($game.Gfx -or (Get-GfxIndex).ContainsKey($game.Cartella)) { [void](Save-NvBackup 'prima_di_ripristinare'); Clear-GameGfx $game }
     if ($game.Forzato -or (Get-ForceIndex).ContainsKey($game.Cartella)) { Disable-GameOverride $game }
     $idx = Get-BackupIndex
     foreach ($p in Get-GameDllPaths $game) {
@@ -763,7 +857,17 @@ $lnkAdd = New-Object Windows.Forms.LinkLabel -Property @{
     Text = '+ Aggiungi cartella giochi'; LinkColor = $C.Green; ActiveLinkColor = $C.Text; LinkBehavior = 'HoverUnderline'
 }
 $script:tips.SetToolTip($lnkAdd, 'Se un gioco non compare, indica la cartella dove sono installati i tuoi giochi: verra'' cercata anche in futuro.')
-$statusBar.Controls.AddRange(@($status, $lnkAdd))
+$txtSearch = New-Object Windows.Forms.TextBox -Property @{
+    Dock = 'Right'; Width = 210; BorderStyle = 'FixedSingle'; BackColor = $C.Card; ForeColor = $C.Sub; Font = New-Font 9.5
+    Text = 'Cerca gioco...'; Margin = '0,0,0,0'; TabStop = $false
+}
+$searchPad = New-Object Windows.Forms.Panel -Property @{ Dock = 'Right'; Width = 226; Padding = '0,5,16,4' }
+$searchPad.Controls.Add($txtSearch)
+$txtSearch.Add_Enter({ if ($txtSearch.Text -eq 'Cerca gioco...') { $txtSearch.Text = ''; $txtSearch.ForeColor = $C.Text } })
+$txtSearch.Add_Leave({ if (-not $txtSearch.Text) { $txtSearch.Text = 'Cerca gioco...'; $txtSearch.ForeColor = $C.Sub } })
+$txtSearch.Add_TextChanged({ Set-SearchFilter })
+$script:tips.SetToolTip($txtSearch, 'Mostra solo i giochi il cui nome contiene il testo scritto.')
+$statusBar.Controls.AddRange(@($status, $searchPad, $lnkAdd))
 
 # Elenco dei giochi
 $list = New-Object Windows.Forms.FlowLayoutPanel -Property @{
@@ -774,6 +878,14 @@ $list.GetType().GetProperty('DoubleBuffered', [Reflection.BindingFlags]'Instance
 $form.Controls.AddRange(@($list, $statusBar, $accent, $header, $footer))
 
 function Set-Status([string]$text, $color) { $status.Text = $text; $status.ForeColor = $color }
+
+function Set-SearchFilter {
+    $q = $txtSearch.Text.Trim()
+    if ($q -eq 'Cerca gioco...') { $q = '' }
+    $list.SuspendLayout()
+    foreach ($c in $list.Controls) { $c.Visible = (-not $q) -or ($c.Controls['title'].Text -like "*$q*") }
+    $list.ResumeLayout()
+}
 
 function Get-UpscalerText($g) {
     $t = @(); if ($g.Fsr) { $t += 'FSR' }; if ($g.Xess) { $t += 'XeSS' }
@@ -852,14 +964,21 @@ function New-GameCard($g, $idx) {
     $bUp.Enabled = $canMain
     $bUp.Name = 'up'; $bUp.Tag = $g
 
-    $canRestore = $hasBackup -or $g.Forzato -or $g.Opti
+    $canGfx = [bool]$script:gpu -and [bool]$g.Exes
+    $bGfx = New-FlatButton 'GRAFICA' $C.Btn $(if (-not $canGfx) { $C.Sub } elseif ($g.Gfx) { $C.Green } else { $C.Text }) 100
+    $bGfx.Enabled = $canGfx
+    $bGfx.Name = 'gfx'; $bGfx.Tag = $g
+    $script:tips.SetToolTip($bGfx, $(if ($g.Gfx) { "Impostazioni grafiche attive nel profilo driver di questo gioco. Clic per cambiarle o toglierle." } elseif ($canGfx) { "Migliora la grafica di questo gioco con le impostazioni del driver NVIDIA (filtro anisotropico, qualita' texture, qualita' e modello DLSS). Non tocca i file del gioco: sicuro anche online." } else { "Serve una scheda RTX e l'eseguibile del gioco." }))
+    $bGfx.Add_Click({ $g = $this.Tag; Show-GfxDialog $g })
+
+    $canRestore = $hasBackup -or $g.Forzato -or $g.Opti -or $g.Gfx
     $bRe = New-FlatButton 'RIPRISTINA' $C.Btn $(if ($canRestore) { $C.Text } else { $C.Sub }) 120
     $bRe.Enabled = $canRestore
     $bRe.Name = 're'; $bRe.Tag = $g
     $script:tips.SetToolTip($bRe, "Rimette il gioco com'era: toglie override del driver e OptiScaler, rimette i file originali.")
     $bRe.Add_Click({ $g = $this.Tag; Invoke-Action { Restore-Game $g } "$($g.Nome): ripristinato com'era." })
 
-    $card.Controls.AddRange(@($bUp, $bRe))
+    $card.Controls.AddRange(@($bGfx, $bUp, $bRe))
 
     # I gestori usano $this (il controllo che ha generato l'evento) e Tag (il gioco),
     # cosi' restano nello scope dello script e vedono le sue funzioni.
@@ -881,7 +1000,8 @@ function Set-CardLayout($card) {
     $card.Controls['src'].Location = "$($t.Right + 10),$($t.Top + 4)"
     $card.Controls['re'].Location = "$($card.Width - 140),31"
     $card.Controls['up'].Location = "$($card.Width - 270),31"
-    $xOrig = $card.Width - 270 - 30 - 190
+    $card.Controls['gfx'].Location = "$($card.Width - 380),31"
+    $xOrig = $card.Width - 380 - 30 - 190
     $xCur = $xOrig - 200
     foreach ($n in 'capCur', 'valCur', 'extra', 'state') { $card.Controls[$n].Left = $xCur }
     foreach ($n in 'capOrig', 'valOrig') { $card.Controls[$n].Left = $xOrig }
@@ -909,6 +1029,7 @@ function Update-GameList {
         foreach ($g in $script:games) { $list.Controls.Add((New-GameCard $g $idx)) }
         Resize-Cards
         $list.ResumeLayout()
+        Set-SearchFilter
         $todo = @($script:games | Where-Object { Test-NeedsForce $_ }).Count
         $btnAll.Enabled = [bool]$script:gpu -and $todo -gt 0
         $btnAll.BackColor = if ($btnAll.Enabled) { $C.Green } else { $C.Btn }
@@ -917,7 +1038,8 @@ function Update-GameList {
             Set-Status "Nessuna scheda NVIDIA RTX trovata: il DLSS funziona solo su RTX serie 20 o superiori. Aggiornamento disattivato." $C.Orange
         } elseif (-not $script:keepStatus) {
             $nDlss = @($script:games | Where-Object { $_.Dll }).Count
-            Set-Status "$($script:games.Count) giochi trovati ($nDlss con DLSS)  -  $todo da aggiornare.  File originali e impostazioni del driver vengono sempre salvati: si ripristina con un clic." $C.Sub
+            if ($script:dlssNews) { Set-Status "$($script:dlssNews)$($script:games.Count) giochi, $todo da aggiornare." $C.Green }
+            else { Set-Status "$($script:games.Count) giochi trovati ($nDlss con DLSS)  -  $todo da aggiornare.  File originali e impostazioni del driver vengono sempre salvati: si ripristina con un clic." $C.Sub }
         }
         $script:keepStatus = $false
     } catch {
@@ -1123,6 +1245,88 @@ function Show-NvidiaDialog {
     [void]$dlg.ShowDialog($form)
 }
 
+# Finestra "Migliora grafica" di un gioco.
+function Show-GfxDialog($g) {
+    $entry = (Get-GfxIndex)[$g.Cartella]
+    $isRtx50 = $script:gpu -match 'RTX\s*50\d{2}'
+    $dlg = New-Object Windows.Forms.Form -Property @{
+        Text = "Migliora grafica  -  $($g.Nome)"; Size = '760,620'; StartPosition = 'CenterParent'; FormBorderStyle = 'FixedDialog'
+        MaximizeBox = $false; MinimizeBox = $false; BackColor = $C.Bg; ForeColor = $C.Text; Font = New-Font 10
+    }
+    if ($form.Icon) { $dlg.Icon = $form.Icon }
+    $dlg.Add_HandleCreated({ $on = 1; [void][Win.Dwm]::DwmSetWindowAttribute($this.Handle, 20, [ref]$on, 4) })
+    $dlg.Controls.Add((New-Label 'Migliora la grafica di questo gioco' (New-Font 15 'Bold') $C.Text 24 18))
+    $intro = New-Object Windows.Forms.Label -Property @{ Location = '26,52'; Size = '700,40'; ForeColor = $C.Sub; Font = New-Font 9
+        Text = "Sono impostazioni del driver NVIDIA, le stesse del Pannello di controllo, scritte nel profilo di questo gioco. NON toccano i file del gioco: sono sicure anche nei giochi online e con anti-cheat$(if ($g.AntiCheat) { " (questo gioco usa $($g.AntiCheat))" }). Si tolgono con RIPRISTINA o con TOGLI TUTTO." }
+    $dlg.Controls.Add($intro)
+
+    $y = 100
+    $checks = @{}
+    foreach ($o in $GfxOptions) {
+        $row = New-Object Windows.Forms.Panel -Property @{ Location = "24,$y"; Size = '700,50'; BackColor = $C.Card }
+        $cb = New-Object Windows.Forms.CheckBox -Property @{ Location = '14,6'; AutoSize = $true; Text = $o.Nome; Font = New-Font 10 'Bold'; ForeColor = $C.Text
+            Checked = $(if ($entry) { [bool]($entry.Scelte.PSObject.Properties[$o.Key] -and $entry.Scelte.($o.Key)) } else { $true }) }
+        $row.Controls.Add($cb)
+        $row.Controls.Add((New-Label $o.Perche (New-Font 8) $C.Sub 32 28))
+        $dlg.Controls.Add($row)
+        $checks[$o.Key] = $cb
+        $y += 56
+    }
+
+    $combos = @{}
+    $addCombo = {
+        param($key, $titolo, $spiega, $items, $current)
+        $dlg.Controls.Add((New-Label $titolo (New-Font 10 'Bold') $C.Text 24 ($script:gy + 2)))
+        $cmb = New-Object Windows.Forms.ComboBox -Property @{ Location = "370,$($script:gy)"; Width = 354; DropDownStyle = 'DropDownList'; FlatStyle = 'Flat'; BackColor = $C.Card; ForeColor = $C.Text; Font = New-Font 9.5 }
+        foreach ($k in $items.Keys) { [void]$cmb.Items.Add($k) }
+        $sel = 0
+        if ($null -ne $current) { $i = 0; foreach ($k in $items.Keys) { if ("$($items[$k])" -eq "$current") { $sel = $i }; $i++ } }
+        $cmb.SelectedIndex = $sel
+        $dlg.Controls.Add($cmb)
+        $dlg.Controls.Add((New-Label $spiega (New-Font 8) $C.Sub 26 ($script:gy + 28)))
+        $combos[$key] = $cmb
+        $script:gy += 54
+    }
+    $script:gy = $y + 6
+    if ($g.Dll) {
+        $curMode = if ($entry -and $entry.Scelte.PSObject.Properties['SrMode']) { $entry.Scelte.SrMode } else { $null }
+        & $addCombo 'SrMode' "Qualita' DLSS forzata" "Sovrascrive la modalita' scelta nel gioco. DLAA rende alla risoluzione piena: bellissimo ma pesante, solo se hai FPS da vendere." $GfxSrModes $curMode
+        $curPreset = if ($entry -and $entry.Preset) { $entry.Preset } else { $NvLatestPreset }
+        & $addCombo 'SrPreset' 'Modello DLSS (preset)' "Il modello Transformer piu' recente e' quasi sempre il migliore. K e' l'alternativa se noti ghosting o sfocature." $GfxPresets $curPreset
+        if ($isRtx50 -and ($g.Extra | Where-Object { $_.Sigla -eq 'FG' })) {
+            $curMf = if ($entry -and $entry.Scelte.PSObject.Properties['MultiFrame']) { $entry.Scelte.MultiFrame } else { $null }
+            & $addCombo 'MultiFrame' 'Multi Frame Generation' "Solo RTX 50: quanti fotogrammi generare per ognuno renderizzato. Piu' fluido, ma aumenta un po' la latenza." $GfxMultiFg $curMf
+        }
+    }
+
+    $note = New-Object Windows.Forms.Label -Property @{ Location = '26,500'; Size = '700,36'; ForeColor = $C.Sub; Font = New-Font 9
+        Text = "Prima di ogni modifica viene salvata una copia completa delle impostazioni NVIDIA. Le modifiche valgono dal prossimo avvio del gioco." + $(if ($script:olderRtx) { " Sulla tua RTX serie 20/30 evita DLAA nei giochi pesanti." }) }
+    $dlg.Controls.Add($note)
+    $bApply = New-FlatButton 'APPLICA' $C.Green ([Drawing.Color]::Black) 160
+    $bClear = New-FlatButton 'TOGLI TUTTO' $C.Btn $(if ($entry) { $C.Text } else { $C.Sub }) 150
+    $bClear.Enabled = [bool]$entry
+    $bClose = New-FlatButton 'CHIUDI' $C.Btn $C.Text 110
+    $bApply.Location = '24,540'; $bClear.Location = '196,540'; $bClose.Location = '614,540'
+    $dlg.Controls.AddRange(@($bApply, $bClear, $bClose))
+
+    $bApply.Add_Click({
+        $values = @{}; $scelte = [ordered]@{}
+        foreach ($o in $GfxOptions) { $scelte[$o.Key] = $checks[$o.Key].Checked; if ($checks[$o.Key].Checked) { foreach ($k in $o.Set.Keys) { $values[$k] = $o.Set[$k] } } }
+        if ($combos.ContainsKey('SrMode')) { $v = $GfxSrModes[$combos['SrMode'].SelectedItem]; $scelte['SrMode'] = $v; if ($null -ne $v) { $values['SrMode'] = $v; $values['SrOverride'] = 1 } }
+        if ($combos.ContainsKey('SrPreset')) { $v = $GfxPresets[$combos['SrPreset'].SelectedItem]; if ($v -ne $NvLatestPreset) { $values['SrPreset'] = $v; $values['SrOverride'] = 1 } }
+        if ($combos.ContainsKey('MultiFrame')) { $v = $GfxMultiFg[$combos['MultiFrame'].SelectedItem]; $scelte['MultiFrame'] = $v; if ($null -ne $v) { $values['MultiFrame'] = $v; $values['FgOverride'] = 1; $values['FgPreset'] = $NvLatestPreset } }
+        $dlg.Close()
+        $n = $values.Count
+        Invoke-Action { Set-GameGfx $g $values ([pscustomobject]$scelte) } $(if ($n) { "$($g.Nome): impostazioni grafiche applicate nel profilo driver. Valgono dal prossimo avvio del gioco." } else { "$($g.Nome): nessuna impostazione grafica selezionata, profilo pulito." })
+    })
+    $bClear.Add_Click({
+        $dlg.Close()
+        Invoke-Action { [void](Save-NvBackup 'prima_di_grafica'); Clear-GameGfx $g } "$($g.Nome): impostazioni grafiche tolte, il driver torna a decidere da solo."
+    })
+    $bClose.Add_Click({ $dlg.Close() })
+    [void]$dlg.ShowDialog($form)
+}
+
 $btnNv.Add_Click({
     if (-not $script:gpu) { [void][Windows.Forms.MessageBox]::Show('Serve una scheda NVIDIA RTX.', 'Impostazioni NVIDIA'); return }
     try { Show-NvidiaDialog } catch { Set-Status "Impostazioni NVIDIA non disponibili: $($_.Exception.Message)" $C.Red }
@@ -1142,6 +1346,7 @@ $btnLog.Add_Click({ if (Test-Path $LogFile) { Start-Process notepad.exe $LogFile
 $script:games = @()
 $script:latest = $null
 $script:keepStatus = $false
+$script:dlssNews = $null
 $script:gpu = Get-RtxGpu
 
 # Sulle RTX 20 e 30 i modelli Transformer (DLSS 4 e 4.5) costano piu' FPS che sulle 40/50.
@@ -1196,6 +1401,22 @@ $form.Add_FormClosing({
     $maxTimer.Stop(); $tray.Visible = $false; $tray.Dispose()
 })
 
-$form.Add_Shown({ $form.Refresh(); Update-GameList })
+# Riapre la finestra dov'era l'ultima volta, se quella posizione e' ancora su uno schermo.
+try {
+    $saved = (Get-Config).Finestra
+    if ($saved) {
+        $r = [Drawing.Rectangle]::FromLTRB(0, 0, 0, 0); $n = @($saved -split ',' | ForEach-Object { [int]$_ })
+        $r = New-Object Drawing.Rectangle($n[0], $n[1], $n[2], $n[3])
+        if ([Windows.Forms.Screen]::AllScreens | Where-Object { $_.WorkingArea.IntersectsWith($r) }) { $form.StartPosition = 'Manual'; $form.Bounds = $r }
+    }
+} catch {}
+$form.Add_FormClosing({
+    try {
+        $b = if ($form.WindowState -eq 'Normal') { $form.Bounds } else { $form.RestoreBounds }
+        $cfg = Get-Config; $cfg | Add-Member -NotePropertyName Finestra -NotePropertyValue "$($b.X),$($b.Y),$($b.Width),$($b.Height)" -Force; Save-Config $cfg
+    } catch {}
+})
+
+$form.Add_Shown({ $form.ActiveControl = $btnRefresh; $form.Refresh(); Update-GameList })
 [void]$form.ShowDialog()
 
